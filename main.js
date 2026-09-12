@@ -1,5 +1,5 @@
-const express = require('express');
-const moment = require('moment');
+import express from 'express';
+import moment from 'moment';
 
 const app = express();
 const PORT = 3000;
