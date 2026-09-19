@@ -4,6 +4,8 @@ import moment from 'moment';
 const app = express();
 const PORT = 3000;
 
+app.use(express.json());
+
 const products = [
   { id: 1, name: 'iPhone 15', price: 999, category: 'electronics' },
   { id: 2, name: 'MacBook Pro', price: 1999, category: 'electronics' },
@@ -13,11 +15,31 @@ const products = [
   { id: 6, name: 'book 1', price: 30, category: 'books' }
 ];
 
+function addProduct(newProduct, failQuery) {
+  return new Promise((resolve, reject) => {
+    if (failQuery === 'true') {
+      return reject(new Error('Simulated database saving error'));
+    }
+
+    const newId = products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1;
+    
+    const productToSave = {
+      id: newId,
+      name: newProduct.name,
+      price: Number(newProduct.price),
+      category: newProduct.category,
+      image: newProduct.image || ''
+    };
+
+    products.push(productToSave);
+    resolve(productToSave);
+  });
+}
+
 function getCurrentDay() { return moment().format('dddd'); }
 function getCurrentMonth() { return moment().format('MMMM'); }
 function getCurrentYear() { return moment().format('YYYY'); }
 function getCurrentDate() { return moment().format('dddd, MMMM D, YYYY'); }
-
 function isWeekend() {
   if (moment().day() === 0 || moment().day() === 6) {
     return 'Today is a weekend';
@@ -25,28 +47,16 @@ function isWeekend() {
     return 'Today is a weekday';
   }
 }
-
-function getDaysUntilNewYear() {
-  return `${moment([moment().year() + 1, 0]).diff(moment(), 'days')} days until New Year`;
-}
-
-function getAge(birthDate) {
-  return `You are ${moment().diff(moment(birthDate, 'YYYY-MM-DD'), 'years')} years old`;
-}
-
+function getDaysUntilNewYear() { return `${moment([moment().year() + 1, 0]).diff(moment(), 'days')} days until New Year`; }
+function getAge(birthDate) { return `You are ${moment().diff(moment(birthDate, 'YYYY-MM-DD'), 'years')} years old`; }
 function getDaysUntilBirthday(birthDate) {
   let bdate = moment(birthDate);
   let nextBday = moment([moment().year(), bdate.month(), bdate.date()]);
-  if (nextBday.isBefore(moment(), 'day')) {
-    nextBday.add(1, 'year');
-  }
+  if (nextBday.isBefore(moment(), 'day')) { nextBday.add(1, 'year'); }
   return `${nextBday.diff(moment().startOf('day'), 'days')} days until your birthday`;
 }
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
+app.get('/health', (req, res) => { res.status(200).json({ status: 'ok' }); });
 app.get('/stats', (req, res) => {
   const testBirthDate = "2005-12-20";
   res.status(200).json({
@@ -66,38 +76,45 @@ app.get('/stats', (req, res) => {
 
 app.get('/products', (req, res) => {
   const { category, take } = req.query;
-
   let filteredProducts = products;
-
-  if (category) {
-    filteredProducts = filteredProducts.filter(p => p.category === category.toLowerCase());
-  }
-
+  if (category) { filteredProducts = filteredProducts.filter(p => p.category === category.toLowerCase()); }
   if (take) {
     const limit = parseInt(take, 10);
-    if (!isNaN(limit) && limit > 0) {
-      filteredProducts = filteredProducts.slice(0, limit);
-    }
+    if (!isNaN(limit) && limit > 0) { filteredProducts = filteredProducts.slice(0, limit); }
   }
-
   res.status(200).json(filteredProducts);
 });
 
 app.get('/products/:id', (req, res) => {
   const idParam = req.params.id;
   const productId = parseInt(idParam, 10);
-
-  if (isNaN(productId)) {
-    return res.status(400).json({ message: 'Invalid product ID format. ID must be a number.' });
-  }
-
+  if (isNaN(productId)) { return res.status(400).json({ message: 'Invalid product ID format. ID must be a number.' }); }
   const product = products.find(p => p.id === productId);
+  if (!product) { return res.status(404).json({ message: `Product with ID ${productId} not found.` }); }
+  res.status(200).json(product);
+});
 
-  if (!product) {
-    return res.status(404).json({ message: `Product with ID ${productId} not found.` });
+app.post('/products', async (req, res) => {
+  const { name, price, category, image } = req.body;
+  const { fail } = req.query;
+
+  if (!name || typeof name !== 'string' || name.trim() === '' ||
+      price === undefined || typeof price !== 'number' || price <= 0 ||
+      !category || typeof category !== 'string' || category.trim() === '') {
+    return res.status(422).json({ message: 'Invalid product data' });
   }
 
-  res.status(200).json(product);
+  const isDuplicate = products.some(p => p.name.toLowerCase() === name.trim().toLowerCase());
+  if (isDuplicate) {
+    return res.status(409).json({ message: 'Conflict. Product name already exists.' });
+  }
+
+  try {
+    const savedProduct = await addProduct({ name: name.trim(), price, category: category.trim(), image }, fail);
+    return res.status(201).json(savedProduct);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
 });
 
 app.listen(PORT, () => {
